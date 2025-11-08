@@ -18,7 +18,7 @@ from .extractors.markdown_extractor import MarkdownExtractor
 
 # Import Nexy-Rep configuration (lazy-import other heavy modules at runtime)
 from .nexy_rep.config import Config
-from .llm.agent_logic import get_query_generator_chain
+from .llm.agent_logic import get_query_generator_chain, get_llm, get_prompt
 from .github_activity import GitHubUserActivity
 
 
@@ -295,6 +295,116 @@ class UnifiedService:
             # Keep failure mode explicit for callers
             logging.exception("Agentic query failed")
             return {"error": str(exc)}
+
+    def list_prompts(self) -> list:
+        """Return available prompt files in `services/llm/assets`.
+
+        Returns a list of absolute file paths. This makes prompt files
+        discoverable so callers can pass them to `chat` as the system prompt.
+        """
+        assets_dir = os.path.join(os.path.dirname(__file__), "llm", "assets")
+        prompts = []
+        if os.path.isdir(assets_dir):
+            for fname in os.listdir(assets_dir):
+                if fname.lower().endswith(('.md', '.txt', '.prompt')):
+                    prompts.append(os.path.join(assets_dir, fname))
+        return sorted(prompts)
+
+    def chat(
+        self,
+        session_id: str,
+        user_message: str,
+        system_prompt_file: Optional[str] = None,
+        model_name: Optional[str] = None,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        history_limit: int = 20,
+    ) -> str:
+        """
+        Chat entrypoint that manages session state and returns plain-text assistant reply.
+
+        Behavior:
+          - If `session_id` has no history in DB, the function starts a new session.
+          - Stores the user message and the assistant reply into the DB.
+          - On subsequent calls for the same `session_id`, the previous conversation
+            is included as context (up to `history_limit` messages).
+
+        Args:
+            session_id: Unique session identifier (string).
+            user_message: The user's current message.
+            system_prompt_file: Path to a system prompt file to use as the system message. If not
+                provided, defaults to `services/llm/assets/system_instructions.md`.
+            model_name, base_url, api_key: Optional LLM configuration.
+            history_limit: How many previous messages to include in the context (most recent first).
+
+        Returns:
+            Plain text assistant response.
+        """
+        # Lazy import storage helpers
+        try:
+            from .nexy_rep.storage import ensure_conversation_table, store_chat_message, get_chat_history
+        except Exception:
+            logging.exception("Conversation storage helpers not available")
+            raise
+
+        # Ensure conversation table exists
+        ensure_conversation_table(self.config.db_path)
+
+        # Prepare system prompt
+        if system_prompt_file is None:
+            system_prompt_file = os.path.join(os.path.dirname(__file__), "llm", "assets", "system_instructions.md")
+        if not os.path.isfile(system_prompt_file):
+            # fallback: empty system prompt
+            system_prompt = ""
+        else:
+            system_prompt = get_prompt(system_prompt_file)
+
+        # Fetch prior history and build a plain-text history string
+        rows = get_chat_history(self.config.db_path, session_id, limit=history_limit)
+        history_lines = []
+        for ts, role, msg in rows:
+            # role is expected to be 'user' or 'assistant'
+            prefix = "User:" if role.lower().startswith('user') else "Assistant:"
+            history_lines.append(f"{prefix} {msg}")
+        history_text = "\n".join(history_lines)
+
+        # Build prompt template and invoke LLM
+        # Use provided model or env/default
+        model_to_use = model_name or os.environ.get("NEXA_DEFAULT_MODEL", "ollama")
+        llm = get_llm(model_to_use, base_url=base_url, api_key=api_key)
+
+        # Construct a simple chat-style prompt
+        from langchain_core.prompts import ChatPromptTemplate
+
+        prompt_template = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", "Conversation so far:\n{history}\n\nUser: {message}\nAssistant:")
+        ])
+
+        chain = prompt_template | llm
+
+        try:
+            invocation = {"history": history_text, "message": user_message}
+            res = chain.invoke(invocation)
+            # Normalize the result to a plain string
+            if isinstance(res, str):
+                assistant_text = res
+            else:
+                # Some LLM wrappers return an object; attempt common attributes
+                assistant_text = getattr(res, "text", None) or getattr(res, "content", None) or str(res)
+        except Exception as exc:  # pragma: no cover
+            logging.exception("LLM invocation failed")
+            assistant_text = f"Error: {exc}"
+
+        # Persist the user message and assistant reply
+        try:
+            store_chat_message(self.config.db_path, session_id, "user", user_message)
+            store_chat_message(self.config.db_path, session_id, "assistant", assistant_text)
+        except Exception:
+            logging.exception("Failed to persist chat messages")
+
+        # Return plain text only
+        return assistant_text
 
     # ---------------------------------------------------------------
     # GitHub Activity Integration

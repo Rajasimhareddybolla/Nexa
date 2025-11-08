@@ -70,3 +70,4 @@ def get_query_generator_chain(model_name: str, base_url: Optional[str] = None, a
     ])
     
     return prompt_template | llm | parser
+
