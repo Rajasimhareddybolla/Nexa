@@ -55,7 +55,7 @@ def get_query_generator_chain(model_name: str, base_url: Optional[str] = None, a
 
     parser = PydanticOutputParser(pydantic_object=OutputFormat)
 
-    system_prompt_1 = get_prompt("llm/assets/system_instructions.md")
+    system_prompt_1 = get_prompt("services/llm/assets/system_instructions.md")
 
     format_instructions = parser.get_format_instructions()
     # Escape curly braces in format_instructions
