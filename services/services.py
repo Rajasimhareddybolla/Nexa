@@ -22,6 +22,7 @@ from .nexy_rep.embed import get_embedding
 from .nexy_rep.compare import compute_similarity
 from .nexy_rep.storage import store_data, init_db
 from .nexy_rep.config import Config
+from .github_activity import GitHubUserActivity
 
 class UnifiedService:
     """
@@ -207,3 +208,37 @@ class UnifiedService:
             self._last_embedding = embedding
         
         return result
+
+    # ---------------------------------------------------------------
+    # GitHub Activity Integration
+    # ---------------------------------------------------------------
+    def fetch_github_activity(
+        self,
+        username: str,
+        start_date: str,
+        end_date: str,
+        token: Optional[str] = None,
+        repos: Optional[list] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fetch GitHub activity for a user in the given date range.
+
+        Args:
+            username: GitHub username
+            start_date: Start date in 'YYYY-MM-DD'
+            end_date: End date in 'YYYY-MM-DD'
+            token: Optional GitHub token (falls back to GITHUB_TOKEN env var)
+            repos: Optional list of repository names to filter
+
+        Returns:
+            dict: Summary returned by GitHubUserActivity.get_user_activity()
+        """
+        tracker = GitHubUserActivity(
+            username=username,
+            start_date=start_date,
+            end_date=end_date,
+            token=token,
+            repos=repos,
+        )
+
+        return tracker.get_user_activity()

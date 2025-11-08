@@ -53,5 +53,31 @@ def main():
         print(f"Similarity with previous: {second_result['similarity']}")
         print(f"Image saved: {second_result['image_path']}")  # Should be None due to similarity
 
+    # --------------------------------------------------
+    # 3. Testing GitHub Activity (optional)
+    # --------------------------------------------------
+    print("\n" + "="*50)
+    print("3. Testing GitHub Activity (optional)")
+    print("="*50)
+
+    # This requires network access. If you have a GITHUB_TOKEN in env, it will be used.
+    github_token = os.getenv("GITHUB_TOKEN")
+    if github_token is None:
+        print("Skipping GitHub demo: set GITHUB_TOKEN environment variable to enable API calls (optional).")
+    else:
+        # Example: fetch activity for the past two days for the authenticated user
+        from datetime import date, timedelta
+        end = date.today()
+        start = end - timedelta(days=2)
+        summary = service.fetch_github_activity(
+            username=None or os.getenv("GITHUB_USERNAME"),
+            start_date=start.strftime("%Y-%m-%d"),
+            end_date=end.strftime("%Y-%m-%d"),
+            token=github_token,
+            repos=None,
+        )
+        print("GitHub activity summary:")
+        print(summary)
+
 if __name__ == "__main__":
     main()
