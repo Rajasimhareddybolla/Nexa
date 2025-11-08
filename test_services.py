@@ -138,7 +138,7 @@ def main():
 
     # Optional: Test GitHub activity if token is available
     print("\n=== GitHub Activity Test (optional) ===")
-    github_token = os.getenv("GITHUB_TOKEN") or "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"
+    github_token = os.getenv("GITHUB_TOKEN") 
     github_username = os.getenv("GITHUB_USERNAME") or "Rajasimhareddybolla"
     if github_token:
         # Use last 2 days by default
