@@ -60,17 +60,19 @@ def main():
     print("3. Testing GitHub Activity (optional)")
     print("="*50)
 
-    # This requires network access. If you have a GITHUB_TOKEN in env, it will be used.
+    # This requires network access. You can pass all parameters directly (token, username, repos).
+    # Example: fetch activity for the past two days. Provide token via environment or pass it here.
     github_token = os.getenv("GITHUB_TOKEN")
-    if github_token is None:
+    github_username = os.getenv("GITHUB_USERNAME") or "Rajasimhareddybolla"
+    if not github_token:
         print("Skipping GitHub demo: set GITHUB_TOKEN environment variable to enable API calls (optional).")
     else:
-        # Example: fetch activity for the past two days for the authenticated user
         from datetime import date, timedelta
         end = date.today()
         start = end - timedelta(days=2)
+        # All values are passed as parameters here (you can replace github_token with a string variable)
         summary = service.fetch_github_activity(
-            username=None or os.getenv("GITHUB_USERNAME"),
+            username=github_username,
             start_date=start.strftime("%Y-%m-%d"),
             end_date=end.strftime("%Y-%m-%d"),
             token=github_token,
