@@ -1,0 +1,6 @@
+pyautogui 
+easyocr 
+torch 
+sentence-transformers 
+langchain-community 
+scikit-learn

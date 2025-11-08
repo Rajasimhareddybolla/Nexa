@@ -1,0 +1,9 @@
+[student1]
+name = "Murali"
+age = 20
+city = "Bangalore"
+
+[student2]
+name = "Ravi"
+age = 21
+city = "Mysore"

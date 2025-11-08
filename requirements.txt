@@ -1,0 +1,6 @@
+PyMuPDF==1.22.5          # fitz - PDF reading
+python-docx==0.8.11      # docx reading
+pandas==2.2.2            # csv reading if needed (lightweight usage)
+PyYAML==6.0              # yaml parsing
+markdown==3.4.4          # optional parsing of md to text
+tomli==2.0.1             # toml parsing for < Python 3.11

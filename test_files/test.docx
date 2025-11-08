@@ -1,0 +1,17 @@
+from docx import Document
+import os
+
+# Path where the .docx file will be created
+output_path = os.path.join("test_files", "test.docx")
+
+# Create test_files folder if it doesn't exist
+os.makedirs("test_files", exist_ok=True)
+
+# Create a sample Word document
+doc = Document()
+doc.add_heading("Test DOCX File", level=1)
+doc.add_paragraph("This is a dummy paragraph created to test the extractor.")
+doc.add_paragraph("You can add multiple paragraphs, tables, or lists if needed.")
+doc.save(output_path)
+
+print(f"✅ File created successfully at: {os.path.abspath(output_path)}")
