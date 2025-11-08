@@ -4,6 +4,7 @@ Unified service class that integrates Universal Extractor and Nexy-Rep functiona
 import os
 from datetime import datetime
 from typing import Optional, Dict, Any
+import logging
 
 # Import Universal Extractor classes
 from .extractors.pdf_extractor import PDFExtractor
@@ -15,14 +16,11 @@ from .extractors.yaml_extractor import YAMLExtractor
 from .extractors.toml_extractor import TOMLExtractor
 from .extractors.markdown_extractor import MarkdownExtractor
 
-# Import Nexy-Rep functionalities
-from .nexy_rep.capture import take_screenshot
-from .nexy_rep.ocr import extract_text_from_image
-from .nexy_rep.embed import get_embedding
-from .nexy_rep.compare import compute_similarity
-from .nexy_rep.storage import store_data, init_db
+# Import Nexy-Rep configuration (lazy-import other heavy modules at runtime)
 from .nexy_rep.config import Config
+from .llm.agent_logic import get_query_generator_chain
 from .github_activity import GitHubUserActivity
+
 
 class UnifiedService:
     """
@@ -39,8 +37,18 @@ class UnifiedService:
                 If not provided, default configuration will be used.
         """
         # Initialize Nexy-Rep configuration
-        self.config = Config(config_path) if config_path else Config()
-        init_db(self.config.db_path)
+        # Config currently does not accept a path; always instantiate and attach provided path for downstream use.
+        self.config = Config()
+        if config_path:
+            # Attach for consumers that might expect it
+            setattr(self.config, "user_config_path", config_path)
+        # initialize DB (lazy import to avoid heavy deps during module import)
+        try:
+            from .nexy_rep.storage import init_db
+            init_db(self.config.db_path)
+        except Exception:
+            # If storage/init_db can't be imported at module import time, defer until runtime.
+            logging.debug("nexy_rep.storage.init_db not available at import time; will initialize on first store")
         
         # File type to extractor mapping
         self.extractors = {
@@ -100,11 +108,27 @@ class UnifiedService:
         timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
         temp_image_path = os.path.join(self.config.temp_dir, f"temp_{timestamp_str}.png")
         
-        # Capture screenshot
-        take_screenshot(temp_image_path)
-        
-        # Extract text using OCR
-        text = extract_text_from_image(temp_image_path)
+        # Capture screenshot (lazy import to avoid pyautogui at module import)
+        try:
+            from .nexy_rep.capture import take_screenshot
+            take_screenshot(temp_image_path)
+        except Exception:
+            # If screenshot capture isn't available, record and return an error-like result
+            logging.exception("Screenshot capture not available")
+            return {"timestamp": timestamp, "image_path": None, "text": "", "similarity": 0.0, "error": "capture_unavailable"}
+
+        # Extract text using OCR (lazy import)
+        try:
+            from .nexy_rep.ocr import extract_text_from_image
+            text = extract_text_from_image(temp_image_path)
+        except Exception:
+            logging.exception("OCR not available")
+            # Clean up temp image if present
+            try:
+                os.remove(temp_image_path)
+            except Exception:
+                pass
+            return {"timestamp": timestamp, "image_path": None, "text": "", "similarity": 0.0, "error": "ocr_unavailable"}
         
         result = {
             'timestamp': timestamp,
@@ -117,11 +141,17 @@ class UnifiedService:
             os.remove(temp_image_path)
             return result
         
-        # Get embedding and compute similarity
-        embedding = get_embedding(text)
-        
-        if self._last_embedding is not None:
-            result['similarity'] = compute_similarity(embedding, self._last_embedding)
+        # Get embedding and compute similarity (lazy import)
+        try:
+            from .nexy_rep.embed import get_embedding
+            from .nexy_rep.compare import compute_similarity
+            embedding = get_embedding(text)
+            if self._last_embedding is not None:
+                result['similarity'] = compute_similarity(embedding, self._last_embedding)
+        except Exception:
+            logging.exception("Embedding/compare not available")
+            # If embeddings aren't available, return with zero similarity
+            embedding = None
         
         if store and (self._last_embedding is None or 
                      result['similarity'] < self.config.similarity_threshold):
@@ -132,12 +162,16 @@ class UnifiedService:
             )
             os.rename(temp_image_path, permanent_image_path)
             
-            store_data(
-                self.config.db_path,
-                timestamp=timestamp,
-                image_path=permanent_image_path,
-                extracted_text=text
-            )
+            try:
+                from .nexy_rep.storage import store_data
+                store_data(
+                    self.config.db_path,
+                    timestamp=timestamp,
+                    image_path=permanent_image_path,
+                    extracted_text=text
+                )
+            except Exception:
+                logging.exception("Failed to store data to nexy_rep.storage")
             
             result['image_path'] = permanent_image_path
             self._last_embedding = embedding
@@ -165,8 +199,13 @@ class UnifiedService:
         """
         timestamp = datetime.now()
         
-        # Extract text using OCR
-        text = extract_text_from_image(image_path)
+        # Extract text using OCR (lazy import)
+        try:
+            from .nexy_rep.ocr import extract_text_from_image
+            text = extract_text_from_image(image_path)
+        except Exception:
+            logging.exception("OCR not available for process_image")
+            return {"timestamp": timestamp, "image_path": None, "text": "", "similarity": 0.0, "error": "ocr_unavailable"}
         
         result = {
             'timestamp': timestamp,
@@ -178,11 +217,16 @@ class UnifiedService:
         if not text.strip():
             return result
         
-        # Get embedding and compute similarity
-        embedding = get_embedding(text)
-        
-        if self._last_embedding is not None:
-            result['similarity'] = compute_similarity(embedding, self._last_embedding)
+        # Get embedding and compute similarity (lazy import)
+        try:
+            from .nexy_rep.embed import get_embedding
+            from .nexy_rep.compare import compute_similarity
+            embedding = get_embedding(text)
+            if self._last_embedding is not None:
+                result['similarity'] = compute_similarity(embedding, self._last_embedding)
+        except Exception:
+            logging.exception("Embedding/compare not available for process_image")
+            embedding = None
         
         if store and (self._last_embedding is None or 
                      result['similarity'] < self.config.similarity_threshold):
@@ -197,17 +241,60 @@ class UnifiedService:
             import shutil
             shutil.copy2(image_path, permanent_image_path)
             
-            store_data(
-                self.config.db_path,
-                timestamp=timestamp,
-                image_path=permanent_image_path,
-                extracted_text=text
-            )
+            try:
+                from .nexy_rep.storage import store_data
+                store_data(
+                    self.config.db_path,
+                    timestamp=timestamp,
+                    image_path=permanent_image_path,
+                    extracted_text=text
+                )
+            except Exception:
+                logging.exception("Failed to store data to nexy_rep.storage in process_image")
             
             result['image_path'] = permanent_image_path
             self._last_embedding = embedding
         
         return result
+
+    def run_agentic_query(
+        self,
+        context: str,
+        question: str,
+        model_name: Optional[str] = None,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ) -> Any:
+        """
+        Run the agentic LLM chain on provided context and question.
+
+        This wraps the existing `get_query_generator_chain` from
+        `services/llm/agent_logic.py` and invokes the chain with the
+        given inputs. Returns whatever the chain returns (typically a
+        parsed Pydantic object or a dict-like result).
+
+        Args:
+            context: The textual context to provide to the agent.
+            question: The human question or instruction for the agent.
+            model_name: Optional model identifier (falls back to Ollama/local behavior if not provided).
+            base_url: Optional base URL for remote LLM endpoints (used by some adapters).
+            api_key: Optional API key for hosted models (e.g., Gemini).
+
+        Returns:
+            Any: The chain invocation result. On error, returns a dict with an 'error' key.
+        """
+        # Choose a reasonable default model if none provided. We prefer not to force a hosted model here.
+        model_to_use = model_name or os.environ.get("NEXA_DEFAULT_MODEL")
+
+        try:
+            chain = get_query_generator_chain(model_name=model_to_use or "ollama", base_url=base_url, api_key=api_key)
+            # The chain API in this project uses .invoke with a dict carrying context and question
+            res = chain.invoke({"context": context, "question": question})
+            return res
+        except Exception as exc:  # pragma: no cover - surface runtime errors
+            # Keep failure mode explicit for callers
+            logging.exception("Agentic query failed")
+            return {"error": str(exc)}
 
     # ---------------------------------------------------------------
     # GitHub Activity Integration
